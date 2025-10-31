@@ -84,16 +84,85 @@ function widgetMeta(widget: PizzazWidget) {
   } as const;
 }
 
+function generateMockProducts(query: string): Array<{
+  id: string;
+  name: string;
+  price: number;
+  description: string;
+  image: string;
+  rating: number;
+}> {
+  const allProducts = [
+    {
+      id: "1",
+      name: "Wireless Headphones",
+      price: 79.99,
+      description: "Premium noise-cancelling wireless headphones with 30-hour battery life",
+      image: "https://via.placeholder.com/200x200?text=Headphones",
+      rating: 4.5,
+    },
+    {
+      id: "2",
+      name: "Smart Watch",
+      price: 249.99,
+      description: "Fitness tracker with heart rate monitor and GPS",
+      image: "https://via.placeholder.com/200x200?text=Smart+Watch",
+      rating: 4.7,
+    },
+    {
+      id: "3",
+      name: "Laptop Stand",
+      price: 39.99,
+      description: "Adjustable aluminum laptop stand for ergonomic workspace",
+      image: "https://via.placeholder.com/200x200?text=Laptop+Stand",
+      rating: 4.3,
+    },
+    {
+      id: "4",
+      name: "Mechanical Keyboard",
+      price: 129.99,
+      description: "RGB backlit mechanical keyboard with cherry MX switches",
+      image: "https://via.placeholder.com/200x200?text=Keyboard",
+      rating: 4.6,
+    },
+    {
+      id: "5",
+      name: "USB-C Hub",
+      price: 49.99,
+      description: "Multi-port USB-C hub with HDMI, USB 3.0, and SD card reader",
+      image: "https://via.placeholder.com/200x200?text=USB+Hub",
+      rating: 4.4,
+    },
+    {
+      id: "6",
+      name: "Wireless Mouse",
+      price: 29.99,
+      description: "Ergonomic wireless mouse with precision tracking",
+      image: "https://via.placeholder.com/200x200?text=Mouse",
+      rating: 4.2,
+    },
+  ];
+
+  const lowerQuery = query.toLowerCase();
+  const filtered = allProducts.filter(
+    (product) =>
+      product.name.toLowerCase().includes(lowerQuery) ||
+      product.description.toLowerCase().includes(lowerQuery)
+  );
+
+  return filtered.length > 0 ? filtered : allProducts.slice(0, 3);
+}
+
 const widgets: PizzazWidget[] = [
   {
-    id: "pizza-carousel",
-    title: "Show Pizza Carousel",
-    templateUri: "ui://widget/pizza-carousel.html",
-    invoking: "Carousel some spots",
-    invoked: "Served a fresh carousel",
-    html: readWidgetHtml("pizzaz-carousel"),
-    responseText: "Rendered a pizza carousel!",
-  }
+    id: "search-products",
+    title: "Search Products",
+    templateUri: "ui://widget/product-search.html",
+    invoking: "Searching for products",
+    invoked: "Found products",
+    html: readWidgetHtml("product-search"),
+    responseText: "Rendered product search results!",
+  },
 ];
 
 const widgetsById = new Map<string, PizzazWidget>();
@@ -116,14 +185,30 @@ const toolInputSchema = {
   additionalProperties: false,
 } as const;
 
+const productSearchInputSchema = {
+  type: "object",
+  properties: {
+    query: {
+      type: "string",
+      description: "Product search query string",
+    },
+  },
+  required: ["query"],
+  additionalProperties: false,
+} as const;
+
 const toolInputParser = z.object({
   pizzaTopping: z.string(),
+});
+
+const productSearchInputParser = z.object({
+  query: z.string(),
 });
 
 const tools: Tool[] = widgets.map((widget) => ({
   name: widget.id,
   description: widget.title,
-  inputSchema: toolInputSchema,
+  inputSchema: widget.id === "search-products" ? productSearchInputSchema : toolInputSchema,
   title: widget.title,
   _meta: widgetMeta(widget),
   // To disable the approval prompt for the widgets
@@ -166,21 +251,28 @@ function createPizzazServer(): Server {
 
   server.setRequestHandler(
     ListResourcesRequestSchema,
-    async (_request: ListResourcesRequest) => ({
-      resources,
-    })
+    async (request: ListResourcesRequest) => {
+      console.log(`[MCP Request] ListResources`);
+      const response = {
+        resources,
+      };
+      console.log(`[MCP Response] ListResources - returning ${resources.length} resources`);
+      return response;
+    }
   );
 
   server.setRequestHandler(
     ReadResourceRequestSchema,
     async (request: ReadResourceRequest) => {
+      console.log(`[MCP Request] ReadResource - uri: ${request.params.uri}`);
       const widget = widgetsByUri.get(request.params.uri);
 
       if (!widget) {
+        console.error(`[MCP Response] ReadResource - error: Unknown resource: ${request.params.uri}`);
         throw new Error(`Unknown resource: ${request.params.uri}`);
       }
 
-      return {
+      const response = {
         contents: [
           {
             uri: widget.templateUri,
@@ -190,46 +282,75 @@ function createPizzazServer(): Server {
           },
         ],
       };
+      console.log(`[MCP Response] ReadResource - returning resource for widget: ${widget.id}`);
+      return response;
     }
   );
 
   server.setRequestHandler(
     ListResourceTemplatesRequestSchema,
-    async (_request: ListResourceTemplatesRequest) => ({
-      resourceTemplates,
-    })
+    async (request: ListResourceTemplatesRequest) => {
+      console.log(`[MCP Request] ListResourceTemplates`);
+      const response = {
+        resourceTemplates,
+      };
+      console.log(`[MCP Response] ListResourceTemplates - returning ${resourceTemplates.length} templates`);
+      return response;
+    }
   );
 
   server.setRequestHandler(
     ListToolsRequestSchema,
-    async (_request: ListToolsRequest) => ({
-      tools,
-    })
+    async (request: ListToolsRequest) => {
+      console.log(`[MCP Request] ListTools`);
+      const response = {
+        tools,
+      };
+      console.log(`[MCP Response] ListTools - returning ${tools.length} tools`);
+      return response;
+    }
   );
 
   server.setRequestHandler(
     CallToolRequestSchema,
     async (request: CallToolRequest) => {
+      console.log(`[MCP Request] CallTool - tool: ${request.params.name}, arguments:`, JSON.stringify(request.params.arguments));
       const widget = widgetsById.get(request.params.name);
 
       if (!widget) {
+        console.error(`[MCP Response] CallTool - error: Unknown tool: ${request.params.name}`);
         throw new Error(`Unknown tool: ${request.params.name}`);
       }
 
-      const args = toolInputParser.parse(request.params.arguments ?? {});
+      let structuredContent: Record<string, unknown>;
+      
+      if (widget.id === "search-products") {
+        const args = productSearchInputParser.parse(request.params.arguments ?? {});
+        const products = generateMockProducts(args.query);
+        structuredContent = {
+          query: args.query,
+          products: products,
+        };
+        console.log(`[MCP Response] CallTool - tool: ${request.params.name}, query: ${args.query}, products: ${products.length}`);
+      } else {
+        const args = toolInputParser.parse(request.params.arguments ?? {});
+        structuredContent = {
+          pizzaTopping: args.pizzaTopping,
+        };
+        console.log(`[MCP Response] CallTool - tool: ${request.params.name}, pizzaTopping: ${args.pizzaTopping}`);
+      }
 
-      return {
+      const response = {
         content: [
           {
             type: "text",
             text: widget.responseText,
           },
         ],
-        structuredContent: {
-          pizzaTopping: args.pizzaTopping,
-        },
+        structuredContent,
         _meta: widgetMeta(widget),
       };
+      return response;
     }
   );
 
@@ -247,27 +368,31 @@ const ssePath = "/mcp";
 const postPath = "/mcp/messages";
 
 async function handleSseRequest(res: ServerResponse) {
+  console.log(`[HTTP Request] GET ${ssePath} - establishing SSE connection`);
   res.setHeader("Access-Control-Allow-Origin", "*");
   const server = createPizzazServer();
   const transport = new SSEServerTransport(postPath, res);
   const sessionId = transport.sessionId;
 
+  console.log(`[SSE] Session created - sessionId: ${sessionId}`);
   sessions.set(sessionId, { server, transport });
 
   transport.onclose = async () => {
+    console.log(`[SSE] Session closed - sessionId: ${sessionId}`);
     sessions.delete(sessionId);
     await server.close();
   };
 
   transport.onerror = (error) => {
-    console.error("SSE transport error", error);
+    console.error(`[SSE] Transport error - sessionId: ${sessionId}`, error);
   };
 
   try {
     await server.connect(transport);
+    console.log(`[HTTP Response] GET ${ssePath} - SSE connection established - sessionId: ${sessionId}`);
   } catch (error) {
     sessions.delete(sessionId);
-    console.error("Failed to start SSE session", error);
+    console.error(`[HTTP Response] GET ${ssePath} - Failed to start SSE session - sessionId: ${sessionId}`, error);
     if (!res.headersSent) {
       res.writeHead(500).end("Failed to establish SSE connection");
     }
@@ -279,11 +404,14 @@ async function handlePostMessage(
   res: ServerResponse,
   url: URL
 ) {
+  const sessionId = url.searchParams.get("sessionId");
+  console.log(`[HTTP Request] POST ${postPath} - sessionId: ${sessionId || "missing"}`);
+
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "content-type");
-  const sessionId = url.searchParams.get("sessionId");
 
   if (!sessionId) {
+    console.log(`[HTTP Response] POST ${postPath} - 400 Bad Request: Missing sessionId query parameter`);
     res.writeHead(400).end("Missing sessionId query parameter");
     return;
   }
@@ -291,14 +419,16 @@ async function handlePostMessage(
   const session = sessions.get(sessionId);
 
   if (!session) {
+    console.log(`[HTTP Response] POST ${postPath} - 404 Not Found: Unknown session - sessionId: ${sessionId}`);
     res.writeHead(404).end("Unknown session");
     return;
   }
 
   try {
     await session.transport.handlePostMessage(req, res);
+    console.log(`[HTTP Response] POST ${postPath} - message processed successfully - sessionId: ${sessionId}`);
   } catch (error) {
-    console.error("Failed to process message", error);
+    console.error(`[HTTP Response] POST ${postPath} - 500 Internal Server Error: Failed to process message - sessionId: ${sessionId}`, error);
     if (!res.headersSent) {
       res.writeHead(500).end("Failed to process message");
     }
@@ -310,17 +440,23 @@ const port = Number.isFinite(portEnv) ? portEnv : 8000;
 
 const httpServer = createServer(
   async (req: IncomingMessage, res: ServerResponse) => {
+    const startTime = Date.now();
+    
     if (!req.url) {
+      console.log(`[HTTP Request] ${req.method || "UNKNOWN"} - Missing URL`);
+      console.log(`[HTTP Response] ${req.method || "UNKNOWN"} - 400 Bad Request: Missing URL`);
       res.writeHead(400).end("Missing URL");
       return;
     }
 
     const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+    console.log(`[HTTP Request] ${req.method || "UNKNOWN"} ${url.pathname}${url.search || ""} - ${req.headers["user-agent"] || "unknown client"}`);
 
     if (
       req.method === "OPTIONS" &&
       (url.pathname === ssePath || url.pathname === postPath)
     ) {
+      console.log(`[HTTP Response] OPTIONS ${url.pathname} - 204 No Content (CORS preflight)`);
       res.writeHead(204, {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -340,12 +476,14 @@ const httpServer = createServer(
       return;
     }
 
+    const duration = Date.now() - startTime;
+    console.log(`[HTTP Response] ${req.method || "UNKNOWN"} ${url.pathname} - 404 Not Found (${duration}ms)`);
     res.writeHead(404).end("Not Found");
   }
 );
 
 httpServer.on("clientError", (err: Error, socket) => {
-  console.error("HTTP client error", err);
+  console.error("[HTTP] Client error", err);
   socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
 });
 
